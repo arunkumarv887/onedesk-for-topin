@@ -25,6 +25,21 @@ Only `VITE_MICROSOFT_*` and `VITE_TICKETS_API_URL` are used by the frontend. Nev
 
 If the API reports that `public.tickets` is unavailable, run `supabase/schema.sql` in the SQL Editor for the exact Supabase project configured by `SUPABASE_URL`, then restart the API.
 
+## Deploying to Vercel
+
+The repository includes a Vercel serverless API route at `api/[...path].mjs` alongside the Vite frontend. The frontend uses the same-origin `/api` route in production, even if `VITE_TICKETS_API_URL` is unset or incorrectly points to localhost.
+
+Set these variables in Vercel Project Settings → Environment Variables:
+
+- `VITE_MICROSOFT_CLIENT_ID`, `VITE_MICROSOFT_TENANT_ID`, and `VITE_MICROSOFT_API_SCOPE` for the frontend build.
+- `MICROSOFT_CLIENT_ID`, `MICROSOFT_TENANT_ID`, `MICROSOFT_API_AUDIENCE`, and `MICROSOFT_API_SCOPE_NAME` for API token validation.
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` for server-side database access. Never prefix the secret with `VITE_`.
+- `MICROSOFT_ADMIN_EMAILS` and `MICROSOFT_ADMIN_ROLE` for admin access.
+
+Do not set `VITE_TICKETS_API_URL` to localhost in Vercel. Leave it unset to use `/api`, or set it to `/api`. Redeploy after changing the environment variables. Add the Vercel deployment URLs to the Entra SPA redirect URI configuration. The API allows same-origin calls and continues to require valid Microsoft access tokens for ticket operations.
+
+The `/api/healthz` endpoint checks the Supabase tickets table. The API uses Vercel's request/response lifecycle and does not run `npm run start:api` in production.
+
 The API validates Microsoft access-token signature, issuer, audience, tenant, SPA client, and delegated scope before accessing incident data. Reporters can create and view their own incidents. Users listed in `MICROSOFT_ADMIN_EMAILS` or assigned the `IncidentDesk.Admin` app role can view all incidents and update status or assignment. The Supabase secret bypasses RLS, so it is used only by the API after Microsoft authorization; browser clients cannot query the table directly.
 
 ## Incident features

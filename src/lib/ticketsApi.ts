@@ -15,9 +15,20 @@ type TicketListResponse = {
   isAdmin: boolean
 }
 
+function isLocalApiUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  } catch {
+    return false
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!ticketsApiUrl) {
-    throw new Error('Set VITE_TICKETS_API_URL to configure the incident API.')
+    throw new Error(
+      'Set VITE_TICKETS_API_URL to the public HTTPS URL of the deployed Incident Desk API, then redeploy the frontend.',
+    )
   }
   const token = await getMicrosoftApiToken()
   let response: Response
@@ -32,6 +43,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     })
   } catch (error) {
     if (!(error instanceof TypeError)) throw error
+    if (import.meta.env.PROD && isLocalApiUrl(ticketsApiUrl)) {
+      throw new Error(
+        'The deployed frontend is configured with a local API address. Deploy the Incident Desk API, set VITE_TICKETS_API_URL in Vercel to its public HTTPS URL, and redeploy the frontend.',
+        { cause: error },
+      )
+    }
     throw new Error(
       `Could not connect to the Incident Desk API at ${ticketsApiUrl}. Check the API terminal for Supabase setup errors, then start it with "npm run start:api".`,
       { cause: error },

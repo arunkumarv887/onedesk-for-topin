@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { createClient } from '@supabase/supabase-js'
 import { createRemoteJWKSet, errors, jwtVerify } from 'jose'
+import { pathToFileURL } from 'node:url'
 
 function requiredEnvironment(name) {
   const value = process.env[name]?.trim()
-  if (!value) throw new Error(`${name} must be set in .env.local.`)
+  if (!value) throw new Error(`${name} must be configured in the server environment.`)
   return value
 }
 
@@ -53,7 +54,6 @@ if (!supabaseSecretKey.startsWith('sb_secret_')) {
   }
 }
 const port = Number.parseInt(process.env.API_PORT || '3001', 10)
-const host = process.env.API_HOST?.trim() || '127.0.0.1'
 const allowedOrigins = new Set(
   (process.env.APP_ORIGINS ||
     'http://localhost:5173,http://127.0.0.1:5173')
@@ -132,13 +132,37 @@ async function verifyTicketsTable() {
   throwIfSupabaseError(error)
 }
 
+let readinessCheck
+
+async function ensureApiReady() {
+  if (!readinessCheck) {
+    readinessCheck = verifyTicketsTable().catch((error) => {
+      readinessCheck = undefined
+      throw error
+    })
+  }
+  await readinessCheck
+}
+
 app.disable('x-powered-by')
 app.use((request, response, next) => {
   response.setHeader('Cache-Control', 'no-store')
   response.setHeader('Vary', 'Origin')
   const origin = request.header('origin')
+  let sameOriginHost = false
+  if (origin) {
+    try {
+      const originHost = new URL(origin).host
+      const requestHost =
+        request.header('x-forwarded-host')?.split(',')[0].trim() ||
+        request.header('host')
+      sameOriginHost = originHost === requestHost
+    } catch {
+      sameOriginHost = false
+    }
+  }
 
-  if (origin && !allowedOrigins.has(origin)) {
+  if (origin && !allowedOrigins.has(origin) && !sameOriginHost) {
     response.status(403).json({ error: 'This application origin is not allowed.' })
     return
   }
@@ -362,13 +386,41 @@ app.use((error, _request, response, _next) => {
   response.status(500).json({ error: 'The incident request could not be completed.' })
 })
 
-try {
-  await verifyTicketsTable()
-  app.listen(port, host, () => {
-    console.log(`Incident API listening on http://localhost:${port}`)
-    console.log('Connected to Supabase.')
-  })
-} catch (error) {
-  console.error('Could not connect to Supabase or start the incident API.', error)
-  process.exitCode = 1
+export async function handleVercelRequest(request, response) {
+  try {
+    await ensureApiReady()
+  } catch (error) {
+    if (error?.cause?.code === 'PGRST205') {
+      response.status(503).json({
+        error:
+          'Supabase table public.tickets is unavailable. Run supabase/schema.sql in the SQL Editor for the configured project.',
+      })
+      return
+    }
+    console.error('Could not verify Supabase before handling the API request.', error)
+    response.status(503).json({ error: 'The Incident Desk API is temporarily unavailable.' })
+    return
+  }
+
+  request.url = (request.url || '/').replace(/^\/api(?=\/|[?#]|$)/, '') || '/'
+  app(request, response)
+}
+
+if (
+  process.env.VERCEL !== '1' &&
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  try {
+    await ensureApiReady()
+    const port = Number.parseInt(process.env.API_PORT || '3001', 10)
+    const host = process.env.API_HOST?.trim() || '127.0.0.1'
+    app.listen(port, host, () => {
+      console.log(`Incident API listening on http://${host}:${port}`)
+      console.log('Connected to Supabase.')
+    })
+  } catch (error) {
+    console.error('Could not connect to Supabase or start the incident API.', error)
+    process.exitCode = 1
+  }
 }

@@ -7,11 +7,23 @@ import {
 
 const clientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID
 const tenantId = import.meta.env.VITE_MICROSOFT_TENANT_ID
+const configuredTicketsApiUrl = import.meta.env.VITE_TICKETS_API_URL?.trim()
 
 export const microsoftAuthConfigured = Boolean(clientId && tenantId)
 const apiScope = import.meta.env.VITE_MICROSOFT_API_SCOPE?.trim() || ''
-export const ticketsApiUrl = import.meta.env.VITE_TICKETS_API_URL?.trim() ||
-  (import.meta.env.DEV ? 'http://localhost:3001' : '')
+const isLoopbackApiUrl = (value: string): boolean => {
+  try {
+    const hostname = new URL(value).hostname
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  } catch {
+    return false
+  }
+}
+export const ticketsApiUrl = import.meta.env.PROD
+  ? !configuredTicketsApiUrl || isLoopbackApiUrl(configuredTicketsApiUrl)
+    ? '/api'
+    : configuredTicketsApiUrl
+  : configuredTicketsApiUrl || 'http://localhost:3001'
 
 let client: PublicClientApplication | undefined
 let initialization: Promise<AccountInfo | null> | undefined

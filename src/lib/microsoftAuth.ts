@@ -11,6 +11,7 @@ const configuredTicketsApiUrl = import.meta.env.VITE_TICKETS_API_URL?.trim()
 
 export const microsoftAuthConfigured = Boolean(clientId && tenantId)
 const apiScope = import.meta.env.VITE_MICROSOFT_API_SCOPE?.trim() || ''
+const graphUserScope = 'User.ReadBasic.All'
 const isLoopbackApiUrl = (value: string): boolean => {
   try {
     const hostname = new URL(value).hostname
@@ -113,6 +114,37 @@ export async function getMicrosoftApiToken(): Promise<string> {
     } catch (tokenError) {
       if (isMissingApiScope(tokenError)) throw missingApiScopeError()
       throw tokenError
+    }
+  }
+}
+
+export async function getMicrosoftGraphToken(): Promise<string> {
+  const msal = getClient()
+  await initializeMicrosoftAuth()
+  const account = msal.getActiveAccount() ?? msal.getAllAccounts()[0]
+  if (!account) throw new Error('Sign in with your organization Microsoft account first.')
+
+  try {
+    const result = await msal.acquireTokenSilent({
+      account,
+      scopes: [graphUserScope],
+    })
+    return result.accessToken
+  } catch (error) {
+    if (!(error instanceof InteractionRequiredAuthError)) throw error
+    try {
+      const result = await msal.acquireTokenPopup({
+        account,
+        scopes: [graphUserScope],
+      })
+      return result.accessToken
+    } catch (tokenError) {
+      const message =
+        tokenError instanceof Error ? tokenError.message : 'Microsoft Graph authorization failed.'
+      throw new Error(
+        `Could not authorize Microsoft Graph directory access. Add the delegated User.ReadBasic.All permission to the OneDesk SPA app registration and grant tenant admin consent. Details: ${message}`,
+        { cause: tokenError },
+      )
     }
   }
 }

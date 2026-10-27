@@ -1,4 +1,8 @@
-import { getMicrosoftApiToken, ticketsApiUrl } from './microsoftAuth'
+import {
+  getMicrosoftApiToken,
+  getMicrosoftGraphToken,
+  ticketsApiUrl,
+} from './microsoftAuth'
 import type { IncidentTicket, TicketPriority, TicketStatus } from './tickets'
 
 type TicketApiRecord = Omit<
@@ -26,6 +30,18 @@ export type AppUserAccess = {
   isGlobalAdmin: boolean
   isEntraAdmin: boolean
   lastSeenAt: string
+}
+
+type DirectoryUser = {
+  id: string
+  displayName?: string | null
+  mail?: string | null
+  userPrincipalName?: string | null
+}
+
+type GraphUsersResponse = {
+  value: DirectoryUser[]
+  '@odata.nextLink'?: string
 }
 
 function isLocalApiUrl(url: string): boolean {
@@ -109,6 +125,58 @@ export async function listTickets(): Promise<{
 }
 
 export async function listAppUsers(): Promise<AppUserAccess[]> {
+  const graphToken = await getMicrosoftGraphToken()
+  let nextUrl: string | undefined =
+    'https://graph.microsoft.com/v1.0/users?$select=id,displayName,mail,userPrincipalName&$top=100'
+
+  while (nextUrl) {
+    const graphUrl = new URL(nextUrl)
+    if (
+      graphUrl.protocol !== 'https:' ||
+      graphUrl.hostname !== 'graph.microsoft.com'
+    ) {
+      throw new Error('Microsoft Graph returned an unexpected paging URL.')
+    }
+
+    const graphResponse = await fetch(graphUrl, {
+      headers: { Authorization: `Bearer ${graphToken}` },
+    })
+    if (!graphResponse.ok) {
+      const errorResponse: unknown = await graphResponse.json().catch(() => null)
+      const graphMessage =
+        typeof errorResponse === 'object' &&
+        errorResponse !== null &&
+        'error' in errorResponse &&
+        typeof errorResponse.error === 'object' &&
+        errorResponse.error !== null &&
+        'message' in errorResponse.error &&
+        typeof errorResponse.error.message === 'string'
+          ? errorResponse.error.message
+          : `Microsoft Graph request failed (${graphResponse.status}).`
+      if (graphResponse.status === 403) {
+        throw new Error(
+          `Microsoft Graph denied the directory user request. Add the delegated User.ReadBasic.All permission to the OneDesk app registration, grant tenant admin consent, and retry. Details: ${graphMessage}`,
+        )
+      }
+      throw new Error(graphMessage)
+    }
+
+    const result = (await graphResponse.json()) as GraphUsersResponse
+    const users = result.value.map((directoryUser) => ({
+      userId: directoryUser.id,
+      email:
+        directoryUser.mail ||
+        directoryUser.userPrincipalName ||
+        directoryUser.id,
+      displayName: directoryUser.displayName || directoryUser.userPrincipalName || directoryUser.id,
+    }))
+    await request('/admin/users/sync', {
+      method: 'POST',
+      body: JSON.stringify({ users }),
+    })
+    nextUrl = result['@odata.nextLink']
+  }
+
   const result = await request<{ users: AppUserAccess[] }>('/admin/users')
   return result.users
 }

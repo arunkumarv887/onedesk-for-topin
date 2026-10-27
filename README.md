@@ -7,6 +7,7 @@ Onedesk uses Microsoft Entra ID for sign-in and Supabase Postgres for incident s
 Copy `.env.example` to `.env.local` and configure:
 
 - `VITE_MICROSOFT_CLIENT_ID`, `VITE_MICROSOFT_TENANT_ID`, and `VITE_MICROSOFT_API_SCOPE` for the single-tenant Entra SPA.
+- Add the Microsoft Graph delegated `User.ReadBasic.All` permission to the SPA app registration and grant tenant admin consent so global admins can list the Entra directory from Settings.
 - `MICROSOFT_CLIENT_ID`, `MICROSOFT_TENANT_ID`, `MICROSOFT_API_AUDIENCE`, and `MICROSOFT_API_SCOPE_NAME` for API token validation. The client ID must match the SPA, the audience must match the access token's `aud`, and the scope name must match the delegated scope in Entra.
 - `MICROSOFT_ADMIN_EMAILS` is a comma-separated server-side allowlist of global administrators. These identities can grant or revoke OneDesk admin access for signed-in users. `MICROSOFT_ADMIN_ROLE` can also grant protected admin access through an Entra app role. Only use trusted identities in the allowlist.
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY` for server-side database access. Use the project URL and a Supabase secret key (or legacy `service_role` key); do not use the publishable key for writes and never prefix the secret key with `VITE_`.
@@ -32,6 +33,7 @@ The repository includes a Vercel serverless API route at `api/[...path].mjs` alo
 Set these variables in Vercel Project Settings → Environment Variables:
 
 - `VITE_MICROSOFT_CLIENT_ID`, `VITE_MICROSOFT_TENANT_ID`, and `VITE_MICROSOFT_API_SCOPE` for the frontend build.
+- Add Microsoft Graph delegated `User.ReadBasic.All` to the SPA app registration and grant tenant admin consent to enable directory user listing in Settings.
 - `MICROSOFT_CLIENT_ID`, `MICROSOFT_TENANT_ID`, `MICROSOFT_API_AUDIENCE`, and `MICROSOFT_API_SCOPE_NAME` for API token validation.
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY` for server-side database access. Never prefix the secret with `VITE_`.
 - `MICROSOFT_ADMIN_EMAILS` and `MICROSOFT_ADMIN_ROLE` for admin access.
@@ -40,7 +42,7 @@ Do not set `VITE_TICKETS_API_URL` to localhost in Vercel. Leave it unset to use 
 
 The `/api/healthz` endpoint checks the Supabase tickets table. The API uses Vercel's request/response lifecycle and does not run `npm run start:api` in production.
 
-The API validates Microsoft access-token signature, issuer, audience, tenant, SPA client, and delegated scope before accessing incident data. Reporters can create and view their own incidents. Global administrators listed in `MICROSOFT_ADMIN_EMAILS` can manage user roles from Settings. They can grant/revoke admin access for users who have signed into OneDesk at least once. App users assigned the `IncidentDesk.Admin` Entra role keep protected admin access. Admins can view all incidents and update status or assignment. The Supabase secret bypasses RLS, so it is used only by the API after Microsoft authorization; browser clients cannot query the tables directly.
+The API validates Microsoft access-token signature, issuer, audience, tenant, SPA client, and delegated scope before accessing incident data. Reporters can create and view their own incidents. Global administrators listed in `MICROSOFT_ADMIN_EMAILS` can manage user roles from Settings. Settings loads tenant users through the signed-in global admin's Microsoft Graph delegated `User.ReadBasic.All` permission, then syncs their directory details to OneDesk. App users assigned the `IncidentDesk.Admin` Entra role keep protected admin access. Admins can view all incidents and update status or assignment. The Supabase secret bypasses RLS, so it is used only by the API after Microsoft authorization; browser clients cannot query the tables directly.
 
 ## Incident features
 

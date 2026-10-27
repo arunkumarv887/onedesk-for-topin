@@ -15,6 +15,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Sun,
   TicketCheck,
   TriangleAlert,
   X,
@@ -566,6 +567,17 @@ function App() {
         <header className="topbar">
           <div className="topbar-context">Workspace <span aria-hidden="true">/</span> <strong>{pageTitles[page]}</strong></div>
           <div className="user-area">
+            <label className="theme-toggle topbar-theme-toggle">
+              <span>Dark mode</span>
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Dark mode"
+                checked={isNightMode}
+                onChange={(event) => setIsNightMode(event.target.checked)}
+              />
+              {isNightMode ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
+            </label>
             <div className="user-details">
               <strong>{user.name || user.username}</strong>
               <span>{isAdmin ? 'IT administrator' : 'Employee'}</span>
@@ -672,30 +684,11 @@ function App() {
 
           {page === 'settings' && (
             <>
-              <section className="panel theme-panel" aria-labelledby="theme-heading">
-                <div className="theme-description">
-                  <span className="theme-icon"><Moon size={17} /></span>
-                  <div>
-                    <h2 id="theme-heading">Night mode</h2>
-                    <p>Use a darker appearance across OneDesk on this device.</p>
-                  </div>
-                </div>
-                <label className="theme-toggle">
-                  <span>{isNightMode ? 'On' : 'Off'}</span>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    aria-label="Night mode"
-                    checked={isNightMode}
-                    onChange={(event) => setIsNightMode(event.target.checked)}
-                  />
-                </label>
-              </section>
               <section className="panel access-panel" aria-labelledby="access-heading">
                 <div className="panel-heading access-panel-heading">
                   <div>
                     <h2 id="access-heading">OneDesk user access</h2>
-                    <p>Choose who can view and manage incidents across the organization. Signed-in users appear after their first OneDesk API request.</p>
+                    <p>Choose who can view and manage incidents across the organization. This list is synced from your Microsoft Entra directory.</p>
                   </div>
                   <button
                     className="button secondary refresh-users-button"
@@ -711,7 +704,7 @@ function App() {
                 {settingsError ? null : loadingAppUsers ? (
                   <div className="empty-state" role="status">Loading users…</div>
                 ) : appUsers.length === 0 ? (
-                  <div className="empty-state">No signed-in users yet. Users appear here after they open OneDesk.</div>
+                  <div className="empty-state">No users found yet. A user must successfully access OneDesk or have reported an incident to appear here.</div>
                 ) : (
                   <div className="access-list">
                     {appUsers.map((appUser) => {

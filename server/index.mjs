@@ -201,7 +201,7 @@ app.use((request, response, next) => {
   }
   next()
 })
-app.use(express.json({ limit: '32kb' }))
+app.use(express.json({ limit: '128kb' }))
 
 app.get('/healthz', async (_request, response) => {
   await verifyTicketsTable()
@@ -245,6 +245,64 @@ app.use(async (request, response, next) => {
   }
 })
 
+app.post('/admin/users/sync', async (request, response) => {
+  if (!isGlobalAdmin(request.identity)) {
+    response.status(403).json({ error: 'Global administrator access is required.' })
+    return
+  }
+  if (!userAccessSchemaReady) {
+    response.status(503).json({
+      error:
+        'User access settings are not initialized. Run supabase/schema.sql in the SQL Editor for the configured project, then restart the API.',
+    })
+    return
+  }
+  const input = asRecord(request.body)
+  if (
+    !input ||
+    Object.keys(input).some((key) => key !== 'users') ||
+    !Array.isArray(input.users) ||
+    input.users.length > 100
+  ) {
+    response.status(400).json({ error: 'The Microsoft directory user list is invalid.' })
+    return
+  }
+  const users = input.users.map((user) => {
+    const record = asRecord(user)
+    if (
+      !record ||
+      Object.keys(record).some(
+        (key) => !['userId', 'email', 'displayName'].includes(key),
+      ) ||
+      !isValidObjectId(record.userId) ||
+      typeof record.email !== 'string' ||
+      !record.email.trim() ||
+      record.email.length > 320 ||
+      typeof record.displayName !== 'string' ||
+      !record.displayName.trim() ||
+      record.displayName.length > 256
+    ) {
+      return null
+    }
+    return {
+      object_id: record.userId,
+      email: record.email.trim(),
+      display_name: record.displayName.trim(),
+    }
+  })
+  if (users.some((user) => user === null)) {
+    response.status(400).json({ error: 'A Microsoft directory user is invalid.' })
+    return
+  }
+  if (users.length > 0) {
+    const { error } = await supabase
+      .from('app_users')
+      .upsert(users, { onConflict: 'object_id' })
+    throwIfSupabaseError(error)
+  }
+  response.status(204).end()
+})
+
 app.get('/admin/users', async (request, response) => {
   if (!isGlobalAdmin(request.identity)) {
     response.status(403).json({ error: 'Global administrator access is required.' })
@@ -257,6 +315,39 @@ app.get('/admin/users', async (request, response) => {
     })
     return
   }
+  const { data: ticketReporters, error: reportersError } = await supabase
+    .from('tickets')
+    .select('owner_uid,reporter_email,reporter_name,created_at')
+    .order('created_at', { ascending: false })
+  throwIfSupabaseError(reportersError)
+
+  const reporterById = new Map()
+  for (const ticket of ticketReporters ?? []) {
+    if (!reporterById.has(ticket.owner_uid)) {
+      reporterById.set(ticket.owner_uid, ticket)
+    }
+  }
+  const { data: knownUsers, error: knownUsersError } = await supabase
+    .from('app_users')
+    .select('object_id')
+  throwIfSupabaseError(knownUsersError)
+  const knownUserIds = new Set((knownUsers ?? []).map(({ object_id }) => object_id))
+  const missingUsers = [...reporterById.entries()]
+    .filter(([objectId]) => !knownUserIds.has(objectId))
+    .map(([objectId, ticket]) => ({
+      object_id: objectId,
+      email: ticket.reporter_email,
+      display_name: ticket.reporter_name || ticket.reporter_email,
+      is_entra_admin: false,
+      last_seen_at: ticket.created_at,
+    }))
+  if (missingUsers.length > 0) {
+    const { error: backfillError } = await supabase
+      .from('app_users')
+      .upsert(missingUsers, { onConflict: 'object_id', ignoreDuplicates: true })
+    throwIfSupabaseError(backfillError)
+  }
+
   const [{ data: users, error: usersError }, { data: roles, error: rolesError }] =
     await Promise.all([
       supabase

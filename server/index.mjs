@@ -398,7 +398,7 @@ export async function handleVercelRequest(request, response) {
       return
     }
     console.error('Could not verify Supabase before handling the API request.', error)
-    response.status(503).json({ error: 'The Incident Desk API is temporarily unavailable.' })
+    response.status(503).json({ error: 'The Onedesk API is temporarily unavailable.' })
     return
   }
 

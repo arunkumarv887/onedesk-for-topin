@@ -1,6 +1,6 @@
-# Incident Desk
+# Onedesk
 
-Incident Desk uses Microsoft Entra ID for sign-in and Supabase Postgres for incident storage. The Node.js API validates Microsoft tokens and accesses Supabase with a server-only secret key; Supabase credentials are never sent to the browser.
+Onedesk uses Microsoft Entra ID for sign-in and Supabase Postgres for incident storage. The Node.js API validates Microsoft tokens and accesses Supabase with a server-only secret key; Supabase credentials are never sent to the browser.
 
 ## Configuration
 

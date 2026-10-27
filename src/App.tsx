@@ -19,6 +19,7 @@ import {
 import {
   type AccountInfo,
 } from '@azure/msal-browser'
+import companyLogo from './assets/companyLogo.png'
 import {
   useCallback,
   useEffect,
@@ -388,7 +389,13 @@ function App() {
   if (!authReady) {
     return (
       <div className="login-screen">
-        <div className="loading-state" role="status">Checking sign-in…</div>
+        <div className="login-brand-panel">
+          <img className="login-brand-logo" src={companyLogo} alt="" />
+          <h1>Topin Technologies</h1>
+        </div>
+        <div className="login-form-panel">
+          <div className="loading-state" role="status">Checking sign-in…</div>
+        </div>
       </div>
     )
   }
@@ -396,29 +403,36 @@ function App() {
   if (!user) {
     return (
       <main className="login-screen">
-        <section className="login-card" aria-labelledby="login-heading">
-          <Brand />
-          <h1 id="login-heading">Welcome to Incident Desk</h1>
-          <p>Sign in with your organization’s Microsoft account to report and track IT incidents.</p>
-          {error && <div className="alert" role="alert"><AlertCircle size={15} />{error}</div>}
-          <button
-            className="button"
-            type="button"
-            onClick={() => void handleSignIn()}
-            disabled={!microsoftAuthConfigured || busy}
-          >
-            <MicrosoftMark />
-            {busy ? 'Connecting…' : 'Continue with Microsoft'}
-          </button>
-          {!microsoftAuthConfigured && (
-            <div className="config-notice" role="status">
-              <ShieldCheck size={15} />
-              <span>
-                Configure <code>VITE_MICROSOFT_CLIENT_ID</code>, <code>VITE_MICROSOFT_TENANT_ID</code>, and the Firestore project ID to enable organization-only sign-in.
-              </span>
-            </div>
-          )}
-          <div className="login-footer">Secure access for your organization</div>
+        <section className="login-brand-panel" aria-label="Topin Technologies">
+          <img className="login-brand-logo" src={companyLogo} alt="" />
+          <h1>Topin Technologies</h1>
+          <p>IT support, made simple.</p>
+        </section>
+        <section className="login-form-panel">
+          <div className="login-card" aria-labelledby="login-heading">
+            <div className="login-eyebrow">ONEDESK WORKSPACE</div>
+            <h1 id="login-heading">Sign in to OneDesk</h1>
+            <p>Sign in with your organization’s Microsoft account to report and track IT incidents.</p>
+            {error && <div className="alert" role="alert"><AlertCircle size={15} />{error}</div>}
+            <button
+              className="button"
+              type="button"
+              onClick={() => void handleSignIn()}
+              disabled={!microsoftAuthConfigured || busy}
+            >
+              <MicrosoftMark />
+              {busy ? 'Connecting…' : 'Continue with Microsoft'}
+            </button>
+            {!microsoftAuthConfigured && (
+              <div className="config-notice" role="status">
+                <ShieldCheck size={15} />
+                <span>
+                  Configure <code>VITE_MICROSOFT_CLIENT_ID</code>, <code>VITE_MICROSOFT_TENANT_ID</code>, and the Firestore project ID to enable organization-only sign-in.
+                </span>
+              </div>
+            )}
+            <div className="login-footer">Secure access for your organization</div>
+          </div>
         </section>
       </main>
     )
@@ -452,7 +466,7 @@ function App() {
           <NavButton page="resolved" activePage={page} onSelect={setPage} icon={<TicketCheck size={17} />} label="Resolved" count={resolvedCount} />
         </nav>
         <div className="sidebar-bottom">
-          <strong>Incident Desk</strong>
+          <strong>Topin Technologies</strong>
           <p>{isAdmin ? 'Administrator access' : 'Your reported incidents'}<br />Securely powered by Microsoft</p>
         </div>
       </aside>
@@ -706,8 +720,8 @@ function App() {
 function Brand() {
   return (
     <div className="brand">
-      <span className="brand-mark"><ShieldCheck size={19} /></span>
-      <span>Incident Desk</span>
+      <img className="brand-logo" src={companyLogo} alt="" />
+      <span>Topin Technologies</span>
     </div>
   )
 }

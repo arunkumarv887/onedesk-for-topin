@@ -27,7 +27,7 @@ function isLocalApiUrl(url: string): boolean {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!ticketsApiUrl) {
     throw new Error(
-      'Set VITE_TICKETS_API_URL to the public HTTPS URL of the deployed Incident Desk API, then redeploy the frontend.',
+      'Set VITE_TICKETS_API_URL to the public HTTPS URL of the deployed Onedesk API, then redeploy the frontend.',
     )
   }
   const token = await getMicrosoftApiToken()
@@ -45,18 +45,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (!(error instanceof TypeError)) throw error
     if (import.meta.env.PROD && isLocalApiUrl(ticketsApiUrl)) {
       throw new Error(
-        'The deployed frontend is configured with a local API address. Deploy the Incident Desk API, set VITE_TICKETS_API_URL in Vercel to its public HTTPS URL, and redeploy the frontend.',
+        'The deployed frontend is configured with a local API address. Deploy the Onedesk API, set VITE_TICKETS_API_URL in Vercel to its public HTTPS URL, and redeploy the frontend.',
         { cause: error },
       )
     }
     throw new Error(
-      `Could not connect to the Incident Desk API at ${ticketsApiUrl}. Check the API terminal for Supabase setup errors, then start it with "npm run start:api".`,
+      `Could not connect to the Onedesk API at ${ticketsApiUrl}. Check the API terminal for Supabase setup errors, then start it with "npm run start:api".`,
       { cause: error },
     )
   }
   if (response.status === 404) {
     throw new Error(
-      `No Incident Desk API route was found at ${ticketsApiUrl}. Check that this URL points to the Incident Desk API server.`,
+      `No Onedesk API route was found at ${ticketsApiUrl}. Check that this URL points to the Onedesk API server.`,
     )
   }
   if (!response.ok) {

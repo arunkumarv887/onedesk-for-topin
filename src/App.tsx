@@ -95,6 +95,21 @@ function userTypeLabel(email: string): 'Employee' | 'Client' {
     : 'Client'
 }
 
+function settingsUserType(
+  user: AppUserAccess,
+): 'Admin' | 'Employee' | 'License' | 'Client' {
+  if (user.role === 'admin' || user.isGlobalAdmin || user.isEntraAdmin) {
+    return 'Admin'
+  }
+
+  const domain = user.email.trim().toLowerCase().split('@').at(-1) ?? ''
+  if (domain === 'topin.co.in') return 'Employee'
+  if (domain === 'onmicrosoft.com' || domain.endsWith('.onmicrosoft.com')) {
+    return 'License'
+  }
+  return 'Client'
+}
+
 function dateInMonth(date: Date, month: string): boolean {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` === month
 }
@@ -724,14 +739,23 @@ function App() {
                   <div className="empty-state">No users found yet. A user must successfully access OneDesk or have reported an incident to appear here.</div>
                 ) : (
                   <div className="access-list">
+                    <div className="access-list-header" aria-hidden="true">
+                      <span>User</span>
+                      <span>Account type</span>
+                      <span>OneDesk access</span>
+                    </div>
                     {appUsers.map((appUser) => {
                       const locked = appUser.isGlobalAdmin || appUser.isEntraAdmin
+                      const accountType = settingsUserType(appUser)
                       return (
                         <div className="access-row" key={appUser.userId}>
                           <div className="access-identity">
                             <strong>{appUser.displayName}</strong>
                             <span>{appUser.email}</span>
                             <span className="access-user-id">ID: {appUser.userId}</span>
+                          </div>
+                          <div className="access-type">
+                            <span className={`access-type-badge ${accountType.toLowerCase()}`}>{accountType}</span>
                           </div>
                           {locked ? (
                             <div className="access-protected">

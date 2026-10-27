@@ -601,13 +601,25 @@
   display: grid;
 }
 
+.access-list-header,
 .access-row {
-  display: flex;
-  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px minmax(190px, auto);
   align-items: center;
-  justify-content: space-between;
   gap: 20px;
   padding: 16px 20px;
+}
+
+.access-list-header {
+  color: #8993a6;
+  background: #f8f9fc;
+  border-bottom: 1px solid #edf0f5;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.access-row {
+  min-width: 0;
   border-bottom: 1px solid #edf0f5;
 }
 
@@ -692,6 +704,34 @@
   border-radius: 99px;
   font-size: 10px;
   font-weight: 700;
+}
+
+.access-type-badge {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.access-type-badge.admin {
+  color: #315ee8;
+  background: #eef3ff;
+}
+
+.access-type-badge.employee {
+  color: #18764d;
+  background: #e8f7ef;
+}
+
+.access-type-badge.license {
+  color: #7650b5;
+  background: #f1ebfb;
+}
+
+.access-type-badge.client {
+  color: #66738a;
+  background: #eef0f4;
 }
 
 .theme-toggle {
@@ -1462,6 +1502,32 @@
   background: #293857;
 }
 
+.app-shell[data-theme='dark'] .access-list-header {
+  color: #a5b0c2;
+  background: #172131;
+  border-color: #303b4e;
+}
+
+.app-shell[data-theme='dark'] .access-type-badge.admin {
+  color: #c2d0ff;
+  background: #293857;
+}
+
+.app-shell[data-theme='dark'] .access-type-badge.employee {
+  color: #86d6ad;
+  background: #203d35;
+}
+
+.app-shell[data-theme='dark'] .access-type-badge.license {
+  color: #ceb9f5;
+  background: #362d4b;
+}
+
+.app-shell[data-theme='dark'] .access-type-badge.client {
+  color: #c2cad7;
+  background: #303b4e;
+}
+
 .app-shell[data-theme='dark'] .badge.open {
   color: #f0bc65;
   background: #403522;
@@ -1606,10 +1672,14 @@
   }
 
   .access-row {
+    grid-template-columns: 1fr;
     align-items: flex-start;
-    flex-direction: column;
     gap: 12px;
     padding: 14px 16px;
+  }
+
+  .access-list-header {
+    display: none;
   }
 
   .access-panel-heading {

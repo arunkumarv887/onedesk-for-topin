@@ -405,8 +405,13 @@ function App() {
     setBusy(true)
     setError('')
     try {
-      await createTicket(form)
+      const result = await createTicket(form)
       await loadTickets()
+      if (result.notificationWarning) {
+        setDataError(
+          `Incident submitted, but its email notification could not be sent: ${result.notificationWarning}`,
+        )
+      }
       setForm(emptyForm)
       setShowCreate(false)
       setPage('all')
@@ -426,11 +431,16 @@ function App() {
     setBusy(true)
     setError('')
     try {
-      await updateTicket(selectedTicket.id, {
+      const result = await updateTicket(selectedTicket.id, {
         status: statusDraft,
         assignedTo: assignedDraft.trim(),
       })
       await loadTickets()
+      if (result.notificationWarning) {
+        setDataError(
+          `Incident updated, but its email notification could not be sent: ${result.notificationWarning}`,
+        )
+      }
       setSelectedTicket(null)
     } catch (updateError) {
       setError(

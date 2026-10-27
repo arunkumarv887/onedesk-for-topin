@@ -197,8 +197,8 @@ export async function createTicket(input: {
   category: string
   location: string
   priority: TicketPriority
-}): Promise<void> {
-  await request('/tickets', {
+}): Promise<{ notificationWarning?: string }> {
+  return request('/tickets', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -207,8 +207,8 @@ export async function createTicket(input: {
 export async function updateTicket(
   id: string,
   input: { status: TicketStatus; assignedTo: string },
-): Promise<void> {
-  await request(`/tickets/${encodeURIComponent(id)}`, {
+): Promise<{ notificationWarning?: string }> {
+  return request(`/tickets/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   })

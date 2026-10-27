@@ -24,6 +24,9 @@ const adminEmails = new Set(
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean),
 )
+const microsoftMailClientSecret =
+  process.env.MICROSOFT_MAIL_CLIENT_SECRET?.trim()
+const microsoftMailFrom = process.env.MICROSOFT_MAIL_FROM?.trim()
 const supabaseUrl =
   process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim()
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY?.trim()
@@ -80,6 +83,109 @@ const supabase = createClient(supabaseUrl, supabaseSecretKey, {
     persistSession: false,
   },
 })
+
+let microsoftMailToken
+
+function isClientEmail(email) {
+  const normalizedEmail = email.trim().toLowerCase()
+  const separator = normalizedEmail.lastIndexOf('@')
+  if (separator <= 0 || separator === normalizedEmail.length - 1) return false
+  const domain = normalizedEmail.slice(separator + 1)
+  return (
+    domain !== 'topin.co.in' &&
+    domain !== 'onmicrosoft.com' &&
+    !domain.endsWith('.onmicrosoft.com')
+  )
+}
+
+async function getMicrosoftMailToken() {
+  if (!microsoftMailClientSecret || !microsoftMailFrom) {
+    throw new Error(
+      'Configure MICROSOFT_MAIL_CLIENT_SECRET and MICROSOFT_MAIL_FROM on the API server.',
+    )
+  }
+  if (microsoftMailToken && microsoftMailToken.expiresAt > Date.now() + 60_000) {
+    return microsoftMailToken.value
+  }
+
+  const tokenResponse = await fetch(
+    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: spaClientId,
+        client_secret: microsoftMailClientSecret,
+        scope: 'https://graph.microsoft.com/.default',
+        grant_type: 'client_credentials',
+      }),
+    },
+  )
+  const tokenResult = await tokenResponse.json().catch(() => null)
+  if (
+    !tokenResponse.ok ||
+    typeof tokenResult?.access_token !== 'string' ||
+    typeof tokenResult?.expires_in !== 'number'
+  ) {
+    const details =
+      typeof tokenResult?.error_description === 'string'
+        ? tokenResult.error_description
+        : `Microsoft token request failed (${tokenResponse.status}).`
+    throw new Error(details)
+  }
+  microsoftMailToken = {
+    value: tokenResult.access_token,
+    expiresAt: Date.now() + tokenResult.expires_in * 1000,
+  }
+  return microsoftMailToken.value
+}
+
+async function sendMicrosoftMail(recipients, subject, content) {
+  if (!Array.isArray(recipients) || recipients.length === 0) {
+    throw new Error('No email recipients are configured for this notification.')
+  }
+  const accessToken = await getMicrosoftMailToken()
+  const mailResponse = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(microsoftMailFrom)}/sendMail`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: 'Text', content },
+          toRecipients: recipients.map((address) => ({
+            emailAddress: { address },
+          })),
+        },
+        saveToSentItems: false,
+      }),
+    },
+  )
+  if (mailResponse.ok) return
+
+  const result = await mailResponse.json().catch(() => null)
+  const details =
+    typeof result?.error?.message === 'string'
+      ? result.error.message
+      : `Microsoft Graph email request failed (${mailResponse.status}).`
+  throw new Error(details)
+}
+
+async function notificationWarning(recipients, subject, content) {
+  try {
+    await sendMicrosoftMail(recipients, subject, content)
+    return undefined
+  } catch (error) {
+    console.error('Incident notification email could not be sent.', error)
+    return error instanceof Error
+      ? error.message
+      : 'The email service returned an unexpected error.'
+  }
+}
 
 function ticketFromRow(row) {
   return {
@@ -568,7 +674,32 @@ app.post('/tickets', async (request, response) => {
     .select('id,ticket_number')
     .single()
   throwIfSupabaseError(error)
-  response.status(201).json({ id: data.id, ticketNumber: data.ticket_number })
+  const notificationMessage = [
+    'A new client incident was reported.',
+    '',
+    `Ticket: ${data.ticket_number}`,
+    `Title: ${title}`,
+    `Category: ${category}`,
+    `Priority: ${priority}`,
+    `Status: ${ticket.status}`,
+    `Client: ${ticket.reporterName} <${ticket.reporterEmail}>`,
+    `Location: ${location}`,
+    '',
+    'Description:',
+    description,
+  ].join('\n')
+  const warning = isClientEmail(ticket.reporterEmail)
+    ? await notificationWarning(
+        [...adminEmails],
+        `[OneDesk] New client incident ${data.ticket_number}`,
+        notificationMessage,
+      )
+    : undefined
+  response.status(201).json({
+    id: data.id,
+    ticketNumber: data.ticket_number,
+    ...(warning ? { notificationWarning: warning } : {}),
+  })
 })
 
 app.patch('/tickets/:ticketId', async (request, response) => {
@@ -598,6 +729,17 @@ app.patch('/tickets/:ticketId', async (request, response) => {
     return
   }
 
+  const { data: existingTicket, error: existingTicketError } = await supabase
+    .from('tickets')
+    .select('ticket_number,title,reporter_name,reporter_email,status,assigned_to')
+    .eq('id', ticketId)
+    .maybeSingle()
+  throwIfSupabaseError(existingTicketError)
+  if (!existingTicket) {
+    response.status(404).json({ error: 'The incident was not found.' })
+    return
+  }
+
   const now = new Date().toISOString()
   const { data, error } = await supabase
     .from('tickets')
@@ -614,7 +756,28 @@ app.patch('/tickets/:ticketId', async (request, response) => {
     response.status(404).json({ error: 'The incident was not found.' })
     return
   }
-  response.status(204).end()
+  const assignmentChanged = existingTicket.assigned_to !== assignedTo
+  const statusChanged = existingTicket.status !== status
+  const warning =
+    isClientEmail(existingTicket.reporter_email) &&
+    (assignmentChanged || statusChanged)
+      ? await notificationWarning(
+          [existingTicket.reporter_email],
+          `[OneDesk] Update to incident ${existingTicket.ticket_number}`,
+          [
+            `Your incident ${existingTicket.ticket_number} has been updated.`,
+            '',
+            `Title: ${existingTicket.title}`,
+            ...(statusChanged
+              ? [`Status: ${existingTicket.status} → ${status}`]
+              : []),
+            ...(assignmentChanged
+              ? [`Assigned to: ${assignedTo || 'Not assigned'}`]
+              : []),
+          ].join('\n'),
+        )
+      : undefined
+  response.json({ ...(warning ? { notificationWarning: warning } : {}) })
 })
 
 app.use((request, response) => {

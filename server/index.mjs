@@ -84,6 +84,7 @@ const supabase = createClient(supabaseUrl, supabaseSecretKey, {
 function ticketFromRow(row) {
   return {
     id: row.id,
+    ticketNumber: row.ticket_number,
     title: row.title,
     description: row.description,
     category: row.category,
@@ -103,6 +104,7 @@ function ticketFromRow(row) {
 function ticketToRow(ticket) {
   return {
     id: ticket.id,
+    ...(ticket.ticketNumber ? { ticket_number: ticket.ticketNumber } : {}),
     title: ticket.title,
     description: ticket.description,
     category: ticket.category,
@@ -132,11 +134,32 @@ async function verifyTicketsTable() {
   throwIfSupabaseError(error)
 }
 
+async function verifyUserAccessTables() {
+  const checks = await Promise.all([
+    supabase.from('app_users').select('object_id').limit(0),
+    supabase.from('user_roles').select('object_id').limit(0),
+  ])
+  for (const { error } of checks) throwIfSupabaseError(error)
+}
+
 let readinessCheck
+let userAccessSchemaReady = false
 
 async function ensureApiReady() {
   if (!readinessCheck) {
-    readinessCheck = verifyTicketsTable().catch((error) => {
+    readinessCheck = (async () => {
+      await verifyTicketsTable()
+      try {
+        await verifyUserAccessTables()
+        userAccessSchemaReady = true
+      } catch (error) {
+        if (error?.cause?.code !== 'PGRST205') throw error
+        userAccessSchemaReady = false
+        console.warn(
+          'User access settings are unavailable until supabase/schema.sql is applied.',
+        )
+      }
+    })().catch((error) => {
       readinessCheck = undefined
       throw error
     })
@@ -211,6 +234,7 @@ app.use(async (request, response, next) => {
       return
     }
     request.identity = payload
+    await recordIdentity(payload)
     next()
   } catch (error) {
     if (error instanceof errors.JOSEError) {
@@ -221,15 +245,150 @@ app.use(async (request, response, next) => {
   }
 })
 
-const hasAdminRole = (identity) => {
-  if (Array.isArray(identity.roles) && identity.roles.includes(adminRole)) {
-    return true
+app.get('/admin/users', async (request, response) => {
+  if (!isGlobalAdmin(request.identity)) {
+    response.status(403).json({ error: 'Global administrator access is required.' })
+    return
   }
-  const emails = [identity.preferred_username, identity.email]
+  if (!userAccessSchemaReady) {
+    response.status(503).json({
+      error:
+        'User access settings are not initialized. Run supabase/schema.sql in the SQL Editor for the configured project, then restart the API.',
+    })
+    return
+  }
+  const [{ data: users, error: usersError }, { data: roles, error: rolesError }] =
+    await Promise.all([
+      supabase
+        .from('app_users')
+        .select('object_id,email,display_name,is_entra_admin,last_seen_at')
+        .order('email', { ascending: true }),
+      supabase.from('user_roles').select('object_id,role'),
+    ])
+  throwIfSupabaseError(usersError)
+  throwIfSupabaseError(rolesError)
+  const roleByUserId = new Map(
+    (roles ?? []).map(({ object_id, role }) => [object_id, role]),
+  )
+  response.json({
+    users: (users ?? []).map((user) => {
+      const isGlobal = adminEmails.has(user.email.trim().toLowerCase())
+      const isEntra = user.is_entra_admin
+      const role = roleByUserId.get(user.object_id) === 'admin' ? 'admin' : 'user'
+      return {
+        userId: user.object_id,
+        email: user.email,
+        displayName: user.display_name,
+        role: isGlobal || isEntra || role === 'admin' ? 'admin' : 'user',
+        isGlobalAdmin: isGlobal,
+        isEntraAdmin: isEntra,
+        lastSeenAt: user.last_seen_at,
+      }
+    }),
+  })
+})
+
+app.patch('/admin/users/:userId/role', async (request, response) => {
+  if (!isGlobalAdmin(request.identity)) {
+    response.status(403).json({ error: 'Global administrator access is required.' })
+    return
+  }
+  const { userId } = request.params
+  const input = asRecord(request.body)
+  if (
+    !isValidObjectId(userId) ||
+    !input ||
+    Object.keys(input).some((key) => key !== 'role') ||
+    !['admin', 'user'].includes(input.role)
+  ) {
+    response.status(400).json({ error: 'The user role update is invalid.' })
+    return
+  }
+  const { data: user, error: userError } = await supabase
+    .from('app_users')
+    .select('email,is_entra_admin')
+    .eq('object_id', userId)
+    .maybeSingle()
+  throwIfSupabaseError(userError)
+  if (!user) {
+    response.status(404).json({ error: 'The user was not found.' })
+    return
+  }
+  if (
+    user.is_entra_admin ||
+    adminEmails.has(user.email.trim().toLowerCase())
+  ) {
+    response.status(403).json({
+      error: 'This user’s administrator access is managed outside these settings.',
+    })
+    return
+  }
+  const { error } = await supabase.from('user_roles').upsert(
+    {
+      object_id: userId,
+      role: input.role,
+      updated_by: request.identity.oid,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'object_id' },
+  )
+  throwIfSupabaseError(error)
+  response.status(204).end()
+})
+
+const hasEntraAdminRole = (identity) =>
+  Array.isArray(identity.roles) && identity.roles.includes(adminRole)
+const identityEmails = (identity) =>
+  [identity.preferred_username, identity.email]
     .filter((email) => typeof email === 'string')
     .map((email) => email.trim().toLowerCase())
-  return emails.some((email) => adminEmails.has(email))
+const isGlobalAdmin = (identity) =>
+  identityEmails(identity).some((email) => adminEmails.has(email))
+const isValidObjectId = (value) =>
+  typeof value === 'string' && /^[\da-f-]{36}$/i.test(value)
+
+async function recordIdentity(identity) {
+  if (!userAccessSchemaReady) return
+  const globalAdminEmail = [identity.preferred_username, identity.email].find(
+    (value) =>
+      typeof value === 'string' &&
+      adminEmails.has(value.trim().toLowerCase()),
+  )
+  const email =
+    (typeof globalAdminEmail === 'string' && globalAdminEmail.trim()) ||
+    (typeof identity.preferred_username === 'string' &&
+      identity.preferred_username) ||
+    (typeof identity.email === 'string' && identity.email) ||
+    identity.oid
+  const displayName =
+    typeof identity.name === 'string' && identity.name.trim()
+      ? identity.name.trim()
+      : email
+  const { error } = await supabase.from('app_users').upsert(
+    {
+      object_id: identity.oid,
+      email,
+      display_name: displayName,
+      is_entra_admin: hasEntraAdminRole(identity),
+      last_seen_at: new Date().toISOString(),
+    },
+    { onConflict: 'object_id' },
+  )
+  throwIfSupabaseError(error)
 }
+
+async function hasAdminAccess(identity) {
+  if (isGlobalAdmin(identity) || hasEntraAdminRole(identity)) return true
+  if (!userAccessSchemaReady) return false
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('object_id', identity.oid)
+    .maybeSingle()
+  throwIfSupabaseError(error)
+  return data?.role === 'admin'
+}
+
 const ticketStatuses = new Set(['Open', 'In Progress', 'Resolved'])
 const ticketPriorities = new Set(['Low', 'Medium', 'High', 'Urgent'])
 const ticketCategories = new Set([
@@ -247,7 +406,7 @@ const asRecord = (value) =>
     : null
 
 app.get('/tickets', async (request, response) => {
-  const isAdmin = hasAdminRole(request.identity)
+  const isAdmin = await hasAdminAccess(request.identity)
   let query = supabase
     .from('tickets')
     .select('*')
@@ -258,6 +417,7 @@ app.get('/tickets', async (request, response) => {
   response.json({
     tickets: (data ?? []).map(ticketFromRow),
     isAdmin,
+    isGlobalAdmin: isGlobalAdmin(request.identity),
   })
 })
 
@@ -314,14 +474,14 @@ app.post('/tickets', async (request, response) => {
   const { data, error } = await supabase
     .from('tickets')
     .insert(ticketToRow(ticket))
-    .select('id')
+    .select('id,ticket_number')
     .single()
   throwIfSupabaseError(error)
-  response.status(201).json({ id: data.id })
+  response.status(201).json({ id: data.id, ticketNumber: data.ticket_number })
 })
 
 app.patch('/tickets/:ticketId', async (request, response) => {
-  if (!hasAdminRole(request.identity)) {
+  if (!(await hasAdminAccess(request.identity))) {
     response.status(403).json({ error: 'An administrator role is required.' })
     return
   }
@@ -378,7 +538,7 @@ app.use((error, _request, response, _next) => {
   if (error?.cause?.code === 'PGRST205') {
     response.status(503).json({
       error:
-        'Supabase table public.tickets is unavailable. Run supabase/schema.sql in the SQL Editor for the project configured by SUPABASE_URL.',
+        'OneDesk database tables are unavailable. Run supabase/schema.sql in the SQL Editor for the project configured by SUPABASE_URL.',
     })
     return
   }
@@ -393,7 +553,7 @@ export async function handleVercelRequest(request, response) {
     if (error?.cause?.code === 'PGRST205') {
       response.status(503).json({
         error:
-          'Supabase table public.tickets is unavailable. Run supabase/schema.sql in the SQL Editor for the configured project.',
+          'OneDesk database tables are unavailable. Run supabase/schema.sql in the SQL Editor for the configured project.',
       })
       return
     }

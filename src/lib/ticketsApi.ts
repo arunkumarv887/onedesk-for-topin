@@ -13,6 +13,19 @@ type TicketApiRecord = Omit<
 type TicketListResponse = {
   tickets: TicketApiRecord[]
   isAdmin: boolean
+  isGlobalAdmin: boolean
+}
+
+export type AppUserRole = 'admin' | 'user'
+
+export type AppUserAccess = {
+  userId: string
+  email: string
+  displayName: string
+  role: AppUserRole
+  isGlobalAdmin: boolean
+  isEntraAdmin: boolean
+  lastSeenAt: string
 }
 
 function isLocalApiUrl(url: string): boolean {
@@ -77,6 +90,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export async function listTickets(): Promise<{
   tickets: IncidentTicket[]
   isAdmin: boolean
+  isGlobalAdmin: boolean
 }> {
   const result = await request<TicketListResponse>('/tickets')
   return {
@@ -90,7 +104,23 @@ export async function listTickets(): Promise<{
       }
     }),
     isAdmin: result.isAdmin,
+    isGlobalAdmin: result.isGlobalAdmin,
   }
+}
+
+export async function listAppUsers(): Promise<AppUserAccess[]> {
+  const result = await request<{ users: AppUserAccess[] }>('/admin/users')
+  return result.users
+}
+
+export async function updateUserRole(
+  userId: string,
+  role: AppUserRole,
+): Promise<void> {
+  await request(`/admin/users/${encodeURIComponent(userId)}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  })
 }
 
 export async function createTicket(input: {

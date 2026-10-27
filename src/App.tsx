@@ -9,8 +9,11 @@ import {
   CircleDot,
   LayoutDashboard,
   LogOut,
+  Moon,
   Plus,
+  RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   TicketCheck,
   TriangleAlert,
@@ -35,9 +38,16 @@ import {
   signInWithMicrosoft,
   signOutMicrosoft,
 } from './lib/microsoftAuth'
-import { createTicket, listTickets, updateTicket } from './lib/ticketsApi'
 import {
-  formatTicketNumber,
+  createTicket,
+  listAppUsers,
+  listTickets,
+  updateTicket,
+  updateUserRole,
+  type AppUserAccess,
+  type AppUserRole,
+} from './lib/ticketsApi'
+import {
   ticketCategories,
   ticketStatuses,
   type IncidentTicket,
@@ -45,7 +55,7 @@ import {
   type TicketStatus,
 } from './lib/tickets'
 
-type Page = 'dashboard' | 'all' | 'open' | 'progress' | 'resolved'
+type Page = 'dashboard' | 'all' | 'open' | 'progress' | 'resolved' | 'settings'
 type TicketForm = {
   title: string
   description: string
@@ -103,7 +113,7 @@ function exportCsv(tickets: IncidentTicket[], month: string): void {
     'Created',
   ]
   const rows = tickets.map((ticket) => [
-    formatTicketNumber(ticket.id),
+    ticket.ticketNumber,
     ticket.title,
     ticket.category,
     ticket.priority,
@@ -148,6 +158,10 @@ function MicrosoftMark() {
 function App() {
   const [user, setUser] = useState<AccountInfo | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false)
+  const [isNightMode, setIsNightMode] = useState(
+    () => localStorage.getItem('onedesk-theme') === 'dark',
+  )
   const [authReady, setAuthReady] = useState(!microsoftAuthConfigured)
   const [tickets, setTickets] = useState<IncidentTicket[]>([])
   const [loadedAccountId, setLoadedAccountId] = useState<string | null>(null)
@@ -166,6 +180,14 @@ function App() {
   const [error, setError] = useState('')
   const [dataError, setDataError] = useState('')
   const [statusDraft, setStatusDraft] = useState<TicketStatus>('Open')
+  const [appUsers, setAppUsers] = useState<AppUserAccess[]>([])
+  const [loadingAppUsers, setLoadingAppUsers] = useState(false)
+  const [savingRoleFor, setSavingRoleFor] = useState<string | null>(null)
+  const [settingsError, setSettingsError] = useState('')
+
+  useEffect(() => {
+    localStorage.setItem('onedesk-theme', isNightMode ? 'dark' : 'light')
+  }, [isNightMode])
 
   useEffect(() => {
     if (!microsoftAuthConfigured) return
@@ -208,6 +230,7 @@ function App() {
       const result = await listTickets()
       setTickets(result.tickets)
       setIsAdmin(result.isAdmin)
+      setIsGlobalAdmin(result.isGlobalAdmin)
       setDataError('')
     } catch (loadError) {
       setDataError(
@@ -219,6 +242,22 @@ function App() {
       setLoadedAccountId(user.homeAccountId)
     }
   }, [user])
+
+  async function handleLoadAppUsers(): Promise<void> {
+    setLoadingAppUsers(true)
+    setSettingsError('')
+    try {
+      setAppUsers(await listAppUsers())
+    } catch (loadError) {
+      setSettingsError(
+        loadError instanceof Error
+          ? `Could not load user access: ${loadError.message}`
+          : 'Could not load user access.',
+      )
+    } finally {
+      setLoadingAppUsers(false)
+    }
+  }
 
   useEffect(() => {
     if (!user) return
@@ -282,7 +321,7 @@ function App() {
           ticket.category,
           ticket.reporterName,
           ticket.reporterEmail,
-          formatTicketNumber(ticket.id),
+          ticket.ticketNumber,
         ].some((field) => field.toLowerCase().includes(term)),
       )
     }
@@ -305,6 +344,7 @@ function App() {
       const account = await signInWithMicrosoft()
       setTickets([])
       setIsAdmin(false)
+      setIsGlobalAdmin(false)
       setLoadedAccountId(null)
       setUser(account)
     } catch (signInError) {
@@ -322,6 +362,7 @@ function App() {
       setUser(null)
       setTickets([])
       setIsAdmin(false)
+      setIsGlobalAdmin(false)
       setLoadedAccountId(null)
       setPage('dashboard')
     } catch (signOutError) {
@@ -377,6 +418,32 @@ function App() {
       )
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleAccessChange(
+    appUser: AppUserAccess,
+    role: AppUserRole,
+  ): Promise<void> {
+    setSavingRoleFor(appUser.userId)
+    setSettingsError('')
+    try {
+      await updateUserRole(appUser.userId, role)
+      setAppUsers((currentUsers) =>
+        currentUsers.map((currentUser) =>
+          currentUser.userId === appUser.userId
+            ? { ...currentUser, role }
+            : currentUser,
+        ),
+      )
+    } catch (updateError) {
+      setSettingsError(
+        updateError instanceof Error
+          ? `Could not update access for ${appUser.displayName}: ${updateError.message}`
+          : `Could not update access for ${appUser.displayName}.`,
+      )
+    } finally {
+      setSavingRoleFor(null)
     }
   }
 
@@ -444,6 +511,7 @@ function App() {
     open: 'Open Incidents',
     progress: 'Work in Progress',
     resolved: 'Resolved Incidents',
+    settings: 'User access',
   }
   const pageDescriptions: Record<Page, string> = {
     dashboard: 'A clear overview of your team’s reported incidents.',
@@ -451,12 +519,18 @@ function App() {
     open: 'Incidents waiting to be picked up.',
     progress: 'Incidents currently being worked on.',
     resolved: 'Completed incidents and their history.',
+    settings: 'Manage who can administer OneDesk.',
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={isNightMode ? 'dark' : 'light'}>
       <aside className="sidebar">
-        <Brand />
+        <div className="sidebar-brand">
+          <Brand onClick={() => {
+            setPage('dashboard')
+            void loadTickets()
+          }} />
+        </div>
         <p className="nav-label">Incident management</p>
         <nav className="nav-list" aria-label="Incident navigation">
           <NavButton page="dashboard" activePage={page} onSelect={setPage} icon={<LayoutDashboard size={17} />} label="Dashboard" />
@@ -465,9 +539,26 @@ function App() {
           <NavButton page="progress" activePage={page} onSelect={setPage} icon={<Activity size={17} />} label="Work in progress" count={progressCount} />
           <NavButton page="resolved" activePage={page} onSelect={setPage} icon={<TicketCheck size={17} />} label="Resolved" count={resolvedCount} />
         </nav>
-        <div className="sidebar-bottom">
-          <strong>Topin Technologies</strong>
-          <p>{isAdmin ? 'Administrator access' : 'Your reported incidents'}<br />Securely powered by Microsoft</p>
+        <div className="sidebar-footer">
+          {isGlobalAdmin && (
+            <>
+              <div className="sidebar-footer-divider" aria-hidden="true" />
+              <NavButton
+                page="settings"
+                activePage={page}
+                onSelect={(selectedPage) => {
+                  setPage(selectedPage)
+                  void handleLoadAppUsers()
+                }}
+                icon={<Settings size={17} />}
+                label="Settings"
+              />
+            </>
+          )}
+          <div className="sidebar-bottom">
+            <strong>Topin Technologies</strong>
+            <p>{isAdmin ? 'Administrator access' : 'Your reported incidents'}<br />Securely powered by Microsoft</p>
+          </div>
         </div>
       </aside>
 
@@ -497,37 +588,39 @@ function App() {
               <h1>{pageTitles[page]}</h1>
               <p>{pageDescriptions[page]}</p>
             </div>
-            <div className="heading-actions">
-              <input
-                className="month-input"
-                aria-label="Report month"
-                type="month"
-                value={selectedMonth}
-                onChange={(event) => setSelectedMonth(event.target.value)}
-              />
-              <button
-                className="button secondary"
-                type="button"
-                onClick={() => exportCsv(monthlyTickets, selectedMonth)}
-                title={`Download ${monthlyTickets.length} incidents for ${selectedMonth}`}
-              >
-                <ArrowDownToLine size={15} />
-                Monthly report
-              </button>
-              <button className="button" type="button" onClick={() => setShowCreate(true)}>
-                <Plus size={16} />
-                Report incident
-              </button>
-            </div>
+            {page !== 'settings' && (
+              <div className="heading-actions">
+                <input
+                  className="month-input"
+                  aria-label="Report month"
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(event) => setSelectedMonth(event.target.value)}
+                />
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => exportCsv(monthlyTickets, selectedMonth)}
+                  title={`Download ${monthlyTickets.length} incidents for ${selectedMonth}`}
+                >
+                  <ArrowDownToLine size={15} />
+                  Monthly report
+                </button>
+                <button className="button" type="button" onClick={() => setShowCreate(true)}>
+                  <Plus size={16} />
+                  Report incident
+                </button>
+              </div>
+            )}
           </div>
 
           {page === 'dashboard' && (
             <>
               <section className="metric-grid" aria-label="Incident statistics">
-                <MetricCard title="Open incidents" value={openCount} note="Awaiting action" icon={<TriangleAlert size={15} />} color="amber" />
-                <MetricCard title="In progress" value={progressCount} note="Being worked on" icon={<Clock3 size={15} />} color="blue" />
-                <MetricCard title="Resolved today" value={resolvedToday} note="Completed today" icon={<CheckCircle2 size={15} />} color="green" />
-                <MetricCard title="Total incidents" value={tickets.length} note={isAdmin ? 'Across your organization' : 'Reported by you'} icon={<ClipboardList size={15} />} color="violet" />
+                <MetricCard page="open" onSelect={setPage} title="Open incidents" value={openCount} note="Awaiting action" icon={<TriangleAlert size={15} />} color="amber" />
+                <MetricCard page="progress" onSelect={setPage} title="In progress" value={progressCount} note="Being worked on" icon={<Clock3 size={15} />} color="blue" />
+                <MetricCard page="resolved" onSelect={setPage} title="Resolved today" value={resolvedToday} note="Completed today" icon={<CheckCircle2 size={15} />} color="green" />
+                <MetricCard page="all" onSelect={setPage} title="Total incidents" value={tickets.length} note={isAdmin ? 'Across your organization' : 'Reported by you'} icon={<ClipboardList size={15} />} color="violet" />
               </section>
 
               <section className="overview-grid">
@@ -577,7 +670,102 @@ function App() {
             </>
           )}
 
-          {page !== 'dashboard' && (
+          {page === 'settings' && (
+            <>
+              <section className="panel theme-panel" aria-labelledby="theme-heading">
+                <div className="theme-description">
+                  <span className="theme-icon"><Moon size={17} /></span>
+                  <div>
+                    <h2 id="theme-heading">Night mode</h2>
+                    <p>Use a darker appearance across OneDesk on this device.</p>
+                  </div>
+                </div>
+                <label className="theme-toggle">
+                  <span>{isNightMode ? 'On' : 'Off'}</span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label="Night mode"
+                    checked={isNightMode}
+                    onChange={(event) => setIsNightMode(event.target.checked)}
+                  />
+                </label>
+              </section>
+              <section className="panel access-panel" aria-labelledby="access-heading">
+                <div className="panel-heading access-panel-heading">
+                  <div>
+                    <h2 id="access-heading">OneDesk user access</h2>
+                    <p>Choose who can view and manage incidents across the organization. Signed-in users appear after their first OneDesk API request.</p>
+                  </div>
+                  <button
+                    className="button secondary refresh-users-button"
+                    type="button"
+                    onClick={() => void handleLoadAppUsers()}
+                    disabled={loadingAppUsers}
+                  >
+                    <RefreshCw size={14} className={loadingAppUsers ? 'spinning' : undefined} />
+                    Refresh users
+                  </button>
+                </div>
+                {settingsError && <div className="alert" role="alert"><AlertCircle size={15} />{settingsError}</div>}
+                {settingsError ? null : loadingAppUsers ? (
+                  <div className="empty-state" role="status">Loading users…</div>
+                ) : appUsers.length === 0 ? (
+                  <div className="empty-state">No signed-in users yet. Users appear here after they open OneDesk.</div>
+                ) : (
+                  <div className="access-list">
+                    {appUsers.map((appUser) => {
+                      const locked = appUser.isGlobalAdmin || appUser.isEntraAdmin
+                      return (
+                        <div className="access-row" key={appUser.userId}>
+                          <div className="access-identity">
+                            <strong>{appUser.displayName}</strong>
+                            <span>{appUser.email}</span>
+                            <span className="access-user-id">ID: {appUser.userId}</span>
+                          </div>
+                          {locked ? (
+                            <div className="access-protected">
+                              <span className="access-role-badge">Admin</span>
+                              <span>{appUser.isGlobalAdmin ? 'Global admin' : 'Managed by Entra ID'}</span>
+                            </div>
+                          ) : (
+                            <fieldset
+                              className="role-switch"
+                              aria-label={`Access for ${appUser.displayName}`}
+                              disabled={savingRoleFor === appUser.userId}
+                            >
+                              <label>
+                                <input
+                                  type="radio"
+                                  name={`role-${appUser.userId}`}
+                                  value="user"
+                                  checked={appUser.role === 'user'}
+                                  onChange={() => void handleAccessChange(appUser, 'user')}
+                                />
+                                User
+                              </label>
+                              <label>
+                                <input
+                                  type="radio"
+                                  name={`role-${appUser.userId}`}
+                                  value="admin"
+                                  checked={appUser.role === 'admin'}
+                                  onChange={() => void handleAccessChange(appUser, 'admin')}
+                                />
+                                Admin
+                              </label>
+                            </fieldset>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+
+          {page !== 'dashboard' && page !== 'settings' && (
             <TicketTable
               title={pageTitles[page]}
               tickets={visibleTickets}
@@ -657,7 +845,7 @@ function App() {
       {selectedTicket && (
         <Modal
           title={selectedTicket.title}
-          subtitle={formatTicketNumber(selectedTicket.id)}
+          subtitle={selectedTicket.ticketNumber}
           onClose={() => setSelectedTicket(null)}
         >
           <div className="modal-body">
@@ -717,12 +905,12 @@ function App() {
   )
 }
 
-function Brand() {
+function Brand({ onClick }: { onClick: () => void }) {
   return (
-    <div className="brand">
+    <button className="brand" type="button" onClick={onClick} aria-label="Go to dashboard">
       <img className="brand-logo" src={companyLogo} alt="" />
       <span>Topin Technologies</span>
-    </div>
+    </button>
   )
 }
 
@@ -751,12 +939,16 @@ function NavButton({
 }
 
 function MetricCard({
+  page,
+  onSelect,
   title,
   value,
   note,
   icon,
   color,
 }: {
+  page: Page
+  onSelect: (page: Page) => void
   title: string
   value: number
   note: string
@@ -764,7 +956,12 @@ function MetricCard({
   color: string
 }) {
   return (
-    <div className="metric-card">
+    <button
+      className="metric-card"
+      type="button"
+      onClick={() => onSelect(page)}
+      aria-label={`${title}: ${value}. Open ${page === 'all' ? 'all incidents' : `${page} incidents`}`}
+    >
       <div className="metric-top">
         <span>{title}</span>
         <span className={`metric-icon ${color}`}>{icon}</span>
@@ -773,7 +970,7 @@ function MetricCard({
         <strong>{value}</strong>
         <span>{note}</span>
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -876,7 +1073,7 @@ function TicketTable({
                   <td>
                     <div className="ticket-title">
                       <strong>{ticket.title}</strong>
-                      <span className="ticket-id">{formatTicketNumber(ticket.id)}</span>
+                      <span className="ticket-id">{ticket.ticketNumber}</span>
                     </div>
                   </td>
                   <td><StatusBadge status={ticket.status} /></td>

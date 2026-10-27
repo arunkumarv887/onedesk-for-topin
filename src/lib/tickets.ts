@@ -3,6 +3,7 @@ export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent'
 
 export interface IncidentTicket {
   id: string
+  ticketNumber: string
   title: string
   description: string
   category: string
@@ -32,7 +33,3 @@ export const ticketCategories = [
   'Email & collaboration',
   'Other',
 ]
-
-export function formatTicketNumber(id: string): string {
-  return `INC-${id.slice(-6).toUpperCase()}`
-}

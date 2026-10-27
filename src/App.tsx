@@ -513,7 +513,10 @@ function App() {
   }
 
   const pageTitles: Record<Page, string> = {
-    dashboard: 'Incident Dashboard',
+    dashboard:
+      userTypeLabel(user.username) === 'Client'
+        ? 'Client dashboard'
+        : 'Incident Dashboard',
     all: 'All Incidents',
     open: 'Open Incidents',
     progress: 'Work in Progress',

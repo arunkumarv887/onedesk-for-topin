@@ -653,7 +653,15 @@ export async function handleVercelRequest(request, response) {
     return
   }
 
-  request.url = (request.url || '/').replace(/^\/api(?=\/|[?#]|$)/, '') || '/'
+  const requestUrl = new URL(request.url || '/', 'http://localhost')
+  const rewrittenApiPath = requestUrl.searchParams.get('__api_path')
+  if (rewrittenApiPath) {
+    requestUrl.searchParams.delete('__api_path')
+    request.url = `/${rewrittenApiPath}${requestUrl.search}`
+  } else {
+    request.url = requestUrl.pathname.replace(/^\/api(?=\/|$)/, '') || '/'
+    if (requestUrl.search) request.url += requestUrl.search
+  }
   app(request, response)
 }
 

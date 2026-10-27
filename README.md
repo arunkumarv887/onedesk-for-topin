@@ -28,7 +28,7 @@ If you already have a Supabase project, run `supabase/schema.sql` again to add t
 
 ## Deploying to Vercel
 
-The repository includes a Vercel serverless API route at `api/[...path].mjs` alongside the Vite frontend. The frontend uses the same-origin `/api` route in production, even if `VITE_TICKETS_API_URL` is unset or incorrectly points to localhost.
+The repository includes a Vercel Node.js function at `api/index.mjs` alongside the Vite frontend. A Vercel rewrite sends `/api/*` requests through this shared API handler while preserving the original API path. The frontend uses the same-origin `/api` route in production, even if `VITE_TICKETS_API_URL` is unset or incorrectly points to localhost.
 
 Set these variables in Vercel Project Settings → Environment Variables:
 

@@ -89,6 +89,12 @@ function initials(name: string): string {
     .join('')
 }
 
+function userTypeLabel(email: string): 'Employee' | 'Client' {
+  return email.trim().toLowerCase().endsWith('@topin.co.in')
+    ? 'Employee'
+    : 'Client'
+}
+
 function dateInMonth(date: Date, month: string): boolean {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` === month
 }
@@ -580,7 +586,11 @@ function App() {
             </label>
             <div className="user-details">
               <strong>{user.name || user.username}</strong>
-              <span>{isAdmin ? 'IT administrator' : 'Employee'}</span>
+              <span>
+                {isAdmin
+                  ? `IT administrator · ${userTypeLabel(user.username)}`
+                  : userTypeLabel(user.username)}
+              </span>
             </div>
             <div className="avatar" aria-label={`Signed in as ${user.name || user.username}`}>
               {initials(user.name || user.username || 'U')}
@@ -602,22 +612,26 @@ function App() {
             </div>
             {page !== 'settings' && (
               <div className="heading-actions">
-                <input
-                  className="month-input"
-                  aria-label="Report month"
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(event) => setSelectedMonth(event.target.value)}
-                />
-                <button
-                  className="button secondary"
-                  type="button"
-                  onClick={() => exportCsv(monthlyTickets, selectedMonth)}
-                  title={`Download ${monthlyTickets.length} incidents for ${selectedMonth}`}
-                >
-                  <ArrowDownToLine size={15} />
-                  Monthly report
-                </button>
+                {isAdmin && (
+                  <>
+                    <input
+                      className="month-input"
+                      aria-label="Report month"
+                      type="month"
+                      value={selectedMonth}
+                      onChange={(event) => setSelectedMonth(event.target.value)}
+                    />
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => exportCsv(monthlyTickets, selectedMonth)}
+                      title={`Download ${monthlyTickets.length} incidents for ${selectedMonth}`}
+                    >
+                      <ArrowDownToLine size={15} />
+                      Monthly report
+                    </button>
+                  </>
+                )}
                 <button className="button" type="button" onClick={() => setShowCreate(true)}>
                   <Plus size={16} />
                   Report incident
